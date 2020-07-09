@@ -131,6 +131,7 @@ export interface GardenParams {
   outputs: OutputSpec[]
   projectId: string | null
   enterpriseDomain: string | null
+  useEnterprise: boolean
   plugins: RegisterPluginParam[]
   production: boolean
   projectName: string
@@ -160,11 +161,15 @@ export class Garden {
   private watcher: Watcher
   private asyncLock: any
 
-  // Platform-related instance variables
+  /**
+   * Platform-related instance variables
+   */
   public clientAuthToken: string | null
   public projectId: string | null
   public enterpriseDomain: string | null
   public sessionId: string | null
+  // True if the user is logged in and the project config defines a project id/uid and domain. False otherwise.
+  public useEnterprise: boolean
 
   public readonly configStore: ConfigStore
   public readonly globalConfigStore: GlobalConfigStore
@@ -203,6 +208,7 @@ export class Garden {
     this.clientAuthToken = params.clientAuthToken
     this.enterpriseDomain = params.enterpriseDomain
     this.sessionId = params.sessionId
+    this.useEnterprise = params.useEnterprise
     this.environmentName = params.environmentName
     this.environmentConfigs = params.environmentConfigs
     this.namespace = params.namespace
@@ -336,12 +342,15 @@ export class Garden {
       clientAuthToken = enterpriseInitResult.clientAuthToken
     }
 
+    const useEnterprise = !!(projectId && enterpriseDomain && clientAuthToken)
+
     const garden = new this({
       artifactsPath,
       clientAuthToken,
       sessionId,
       enterpriseDomain: enterpriseDomain || null,
       projectId: projectId || null,
+      useEnterprise,
       projectRoot,
       projectName,
       environmentName,

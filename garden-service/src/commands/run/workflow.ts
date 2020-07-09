@@ -25,6 +25,8 @@ import { getDurationMsec } from "../../util/util"
 import { runScript } from "../../util/util"
 import { ExecaError } from "execa"
 import { LogLevel } from "../../logger/log-node"
+import { gardenEnv } from "../../constants"
+import { registerWorkflowRun } from "../../enterprise/workflow-lifecycle"
 
 const runWorkflowArgs = {
   workflow: new StringParameter({
@@ -64,6 +66,10 @@ export class RunWorkflowCommand extends Command<Args, {}> {
     const outerLog = log.placeholder()
     // Prepare any configured files before continuing
     const workflow = garden.getWorkflowConfig(args.workflow)
+    if (garden.useEnterprise && !gardenEnv.GARDEN_PLATFORM_SCHEDULED) {
+      await registerAndSetUid(garden, log, workflow)
+    }
+    garden.events.emit("workflowRunning", {})
     const templateContext = new WorkflowConfigContext(garden)
     const files = resolveTemplateStrings(workflow.files || [], templateContext)
 
@@ -176,6 +182,7 @@ export class RunWorkflowCommand extends Command<Args, {}> {
     }
 
     printResult({ startedAt, log: outerLog, workflow, success: true })
+    garden.events.emit("workflowComplete", {})
 
     return { result }
   }
@@ -317,6 +324,19 @@ export function logErrors(
     log.error("")
     log.error(formatGardenError(error))
   }
+}
+
+async function registerAndSetUid(garden: Garden, log: LogEntry, config: WorkflowConfig) {
+  const workflowRunUid = await registerWorkflowRun({
+    workflowConfig: config,
+    clientAuthToken: garden.clientAuthToken!,
+    projectId: garden.projectId!,
+    environment: garden.environmentName,
+    namespace: garden.namespace,
+    enterpriseDomain: garden.enterpriseDomain!,
+    log,
+  })
+  garden.events.emit("_workflowRunRegistered", { workflowRunUid })
 }
 
 async function writeWorkflowFile(garden: Garden, file: WorkflowFileSpec) {

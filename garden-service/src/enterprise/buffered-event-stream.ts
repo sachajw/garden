@@ -55,6 +55,8 @@ export interface ConnectBufferedEventStreamParams {
   namespace: string
 }
 
+export const controlEventNames: Set<EventName> = new Set(["_workflowRunRegistered"])
+
 /**
  * Buffers events and log entries and periodically POSTs them to Garden Enterprise if the user is logged in.
  *
@@ -73,6 +75,7 @@ export class BufferedEventStream {
   private projectId: string
   private environmentName: string
   private namespace: string
+  private workflowRunUid: string | undefined
 
   /**
    * We maintain this map to facilitate unsubscribing from a previously connected event bus
@@ -155,6 +158,11 @@ export class BufferedEventStream {
   }
 
   streamEvent<T extends EventName>(name: T, payload: Events[T]) {
+    if (controlEventNames.has(name)) {
+      this.handleControlEvent(name, payload)
+      return
+    }
+
     this.bufferedEvents.push({
       name,
       payload,
@@ -173,7 +181,7 @@ export class BufferedEventStream {
     }
     const data = {
       events,
-      workflowRunUid: gardenEnv.GARDEN_WORKFLOW_RUN_UID,
+      workflowRunUid: this.getWorkflowRunUid(),
       sessionId: this.sessionId,
       projectUid: this.projectId,
       environment: this.environmentName,
@@ -196,7 +204,7 @@ export class BufferedEventStream {
     }
     const data = {
       logEntries,
-      workflowRunUid: gardenEnv.GARDEN_WORKFLOW_RUN_UID,
+      workflowRunUid: this.getWorkflowRunUid(),
       sessionId: this.sessionId,
       projectUid: this.projectId,
     }
@@ -219,5 +227,15 @@ export class BufferedEventStream {
     const logEntriesToFlush = this.bufferedLogEntries.splice(0, logEntryFlushCount)
 
     return Bluebird.all([this.flushEvents(eventsToFlush), this.flushLogEntries(logEntriesToFlush)])
+  }
+
+  getWorkflowRunUid(): string | undefined {
+    return gardenEnv.GARDEN_WORKFLOW_RUN_UID || this.workflowRunUid
+  }
+
+  handleControlEvent<T extends EventName>(name: T, payload: Events[T]) {
+    if (name === "_workflowRunRegistered") {
+      this.workflowRunUid = payload.workflowRunUid
+    }
   }
 }

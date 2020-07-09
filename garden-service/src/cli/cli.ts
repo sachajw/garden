@@ -341,13 +341,15 @@ export class GardenCli {
             garden = await Garden.factory(root, contextOpts)
           }
 
-          if (garden.clientAuthToken && garden.enterpriseDomain && garden.projectId) {
+          if (garden.useEnterprise) {
             log.silly(`Connecting Garden instance to BufferedEventStream`)
+            // If useEnterprise = true, we know that clientAuthToken, enterpriseDomain and projectId are defined.
+
             bufferedEventStream.connect({
               eventBus: garden.events,
-              clientAuthToken: garden.clientAuthToken,
-              enterpriseDomain: garden.enterpriseDomain,
-              projectId: garden.projectId,
+              clientAuthToken: garden.clientAuthToken!,
+              enterpriseDomain: garden.enterpriseDomain!,
+              projectId: garden.projectId!,
               environmentName: garden.environmentName,
               namespace: garden.namespace,
             })
