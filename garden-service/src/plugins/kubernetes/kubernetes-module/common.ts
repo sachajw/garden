@@ -47,9 +47,19 @@ export async function getManifests({
       }
     }
 
-    // Set Garden annotations
-    set(manifest, ["metadata", "annotations", gardenAnnotationKey("service")], module.name)
-    set(manifest, ["metadata", "labels", gardenAnnotationKey("service")], module.name)
+    /**
+     * Set Garden annotations.
+     *
+     * For namespace resources, we use the namespace's name as the annotation value, to ensure that namespace resources
+     * with different names aren't considered by Garden to be the same resource.
+     *
+     * This is relevant e.g. in the context of a shared dev cluster, where several users might create their own
+     * copies of a namespace resource (each named e.g. "${username}-some-namespace") through deploying a `kubernetes`
+     * module that includes a namespace resource in its manifests.
+     */
+    const annotationValue = manifest.kind === "Namespace" ? manifest.metadata.name : module.name
+    set(manifest, ["metadata", "annotations", gardenAnnotationKey("service")], annotationValue)
+    set(manifest, ["metadata", "labels", gardenAnnotationKey("service")], annotationValue)
 
     return manifest
   })

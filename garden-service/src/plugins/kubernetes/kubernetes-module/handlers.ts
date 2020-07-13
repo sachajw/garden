@@ -6,7 +6,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-import { uniq } from "lodash"
+import Bluebird from "bluebird"
+import { partition, uniq } from "lodash"
 
 import { KubernetesModule, configureKubernetesModule, KubernetesService } from "./config"
 import { KubernetesPluginContext } from "../config"
@@ -105,8 +106,24 @@ export async function deployKubernetesService(
 
   const manifests = await getManifests({ api, log, module, defaultNamespace: namespace })
 
+  /**
+   * We separate out manifests for namespace resources, since we don't want to apply a prune selector
+   * when applying them.
+   */
+  const [namespaceManifests, otherManifests] = partition(manifests, (m) => m.kind === "Namespace")
+
   const pruneSelector = getSelector(service)
-  await apply({ log, provider: k8sCtx.provider, manifests, pruneSelector })
+  const applyPromises: Promise<void>[] = []
+  if (namespaceManifests.length > 0) {
+    // Don't prune namespaces
+    applyPromises.push(apply({ log, provider: k8sCtx.provider, manifests: namespaceManifests }))
+  }
+  if (otherManifests.length > 0) {
+    // Prune everything else
+    applyPromises.push(apply({ log, provider: k8sCtx.provider, manifests: otherManifests, pruneSelector }))
+  }
+
+  await Bluebird.all(applyPromises)
 
   await waitForResources({
     namespace,
@@ -137,14 +154,43 @@ async function deleteService(params: DeleteServiceParams): Promise<KubernetesSer
   const api = await KubeApi.factory(log, provider)
   const manifests = await getManifests({ api, log, module, defaultNamespace: namespace })
 
-  await deleteObjectsBySelector({
-    log,
-    provider,
-    namespace,
-    selector: `${gardenAnnotationKey("service")}=${service.name}`,
-    objectTypes: uniq(manifests.map((m) => m.kind)),
-    includeUninitialized: false,
-  })
+  /**
+   * We separate out manifests for namespace resources, since we need to delete each of them by name.
+   *
+   * Unlike other resources, Garden annotates namespace resources with their name - see `getManifests` for a discussion
+   * of this.
+   */
+  const [namespaceManifests, otherManifests] = partition(manifests, (m) => m.kind === "Namespace")
+
+  const deletePromises: Promise<string>[] = []
+  if (namespaceManifests.length > 0) {
+    deletePromises.push(
+      ...namespaceManifests.map((ns) =>
+        deleteObjectsBySelector({
+          log,
+          provider,
+          namespace,
+          selector: `${gardenAnnotationKey("service")}=${ns.metadata.name}`,
+          objectTypes: ["Namespace"],
+          includeUninitialized: false,
+        })
+      )
+    )
+  }
+  if (otherManifests.length > 0) {
+    deletePromises.push(
+      deleteObjectsBySelector({
+        log,
+        provider,
+        namespace,
+        selector: `${gardenAnnotationKey("service")}=${service.name}`,
+        objectTypes: uniq(manifests.map((m) => m.kind)),
+        includeUninitialized: false,
+      })
+    )
+  }
+
+  await Bluebird.all(deletePromises)
 
   return { state: "missing", detail: { remoteResources: [] } }
 }
